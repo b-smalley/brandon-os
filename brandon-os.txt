@@ -1,0 +1,517 @@
+	BITS 16
+
+	jmp short start
+
+start:
+	mov ax, 07C0h
+	add ax, 288
+	mov ss, ax
+	mov sp, 4096
+	mov ax, 07C0h
+	mov ds, ax
+	jmp load_sectors
+
+jmp $
+
+load_sectors:
+    xor ah, ah
+	int 0x13
+	clc
+    mov bx, 0x07E0
+    mov es, bx
+    xor bx, bx
+    mov ah, 0x02 ;function
+    mov al, 0x3  ;sectors to read
+    mov ch, 0x0  ;tracks
+    mov cl, 0x2  ;sector
+    mov dh, 0x0  ;head
+    int 0x13
+	jmp 0x0:0x7E00
+
+	times 510-($-$$) db 0
+	dw 0xAA55
+
+;================================= "Kernel" Sectors ==============================================
+
+	jmp stage1
+;======Stage 1======
+stage1:
+	call newline
+	mov si, sectors_loaded
+	call print
+	call newline
+	call newline
+	mov si, welcome
+	call print
+	mov si, version
+	call print
+	call newline
+	mov si, version
+	call print
+	mov si, intro
+	call print
+	call newline
+	call newline
+	mov si, anykey
+	call print
+	call pause
+	jmp kernel_start
+;===================
+
+kernel_start:
+	call clear_screen
+	call newline
+	mov si, type_command
+	call print
+	call newline
+	mov si, help
+	call print
+	call newline
+	call newline
+	jmp kernel_loop
+
+kernel_loop:
+	call read_print_keystroke
+	jmp kernel_loop
+
+
+;====== Strings ======
+intro db ' is still in development', 0
+welcome db 'Welcome to ', 0
+version db 'Brandon OS v0.0.7', 0
+anykey db 'Press any key...', 0
+sectors_loaded db 'Loaded The Sectors', 0
+type_command db 'Type a command, add a semicolon and press enter to continue.', 0
+help db 'Use the help command for a list of commands.', 0
+read_success db 'Successfully Read a ;', 0
+bad_command db 'no ; present', 0
+invalid_command db 'Invalid Command!', 0
+null_command db 'No command given!', 0
+hello_world db 'Hello World!', 0
+echo_success db 'Echo Command Successful', 0
+list_command db 'Known commands are as listed: hello, echo, serial, shutdown, reboot', 0
+shutdown_dialog db 'The System will now Shutdown!', 0
+serial_sent db 'Serial Data Sent: ', 0
+;===== Functions =====
+
+print:
+	mov ah, 0Eh
+.nxtchar:
+	lodsb
+	cmp al, 0
+	je .done
+	int 10h
+	jmp .nxtchar
+.done:
+	ret
+
+
+newline:
+	push ax
+	mov ah, 0Eh
+	mov al, 0Dh
+	int 10h
+	mov al, 0Ah
+	int 10h
+	pop ax
+	ret
+
+
+pause:
+	push ax
+	mov ah, 0x0
+	int 16h
+	pop ax
+	ret
+
+
+shutdown:
+	mov ax, 0x5301
+	xor bx, bx
+	int 0x15
+	mov ax, 0x5307
+	mov bx, 0x0001
+	mov cx, 0x0003
+	int 0x15
+	call clear_screen
+	cli
+	hlt
+	ret
+
+
+clear_screen:
+	pusha
+    mov ah, 0x0
+    mov al, 0x03  ; text mode 80x25 16 colors
+    int 0x10
+    popa
+    ret
+
+
+printchar:
+	mov ah, 0x0E
+	int 0x10
+	ret
+
+
+read_print_keystroke:
+	mov ah, 0x0
+	int 0x16
+	call check_key
+	call printchar
+	ret
+
+
+check_key:
+	cmp al, 0x08
+	je backspacekey
+	cmp al, 0x0D
+	je enterkey
+	jmp keycheckend
+	backspacekey:
+    	call printchar
+    	mov al, 0x20
+    	call printchar
+    	mov al, 0x08
+    	jmp keycheckend
+	enterkey:
+    	call read_command
+    	mov si, bad_command
+    	call print
+    	call newline
+    	mov al, 0x08
+    	jmp keycheckend
+	keycheckend:
+		ret
+
+
+read_command:
+	mov cx, 0x0
+	push cx
+	mov  bh, 0
+	mov  ah, 03h
+	int  10h
+ 	mov  dl, 0
+	mov  ah, 02h
+	int  10h
+	mov  ah, 08h
+	int  10h
+	jmp read_command_loop
+	read_command_loop:
+		pop cx
+		cmp cl, 79
+		je command_fail
+		inc cl
+		push cx 
+		mov  bh, 0
+		mov  ah, 03h
+		int  10h
+ 		inc  dl
+		mov  ah, 02h
+		int  10h
+		mov  ah, 08h
+		int  10h
+		cmp al, 0x3b
+		je read_command_true
+		jmp read_command_loop
+	read_command_true:
+		mov  bh, 0
+		mov  ah, 03h
+		int  10h
+ 		mov  dl, 0
+		mov  ah, 02h
+		int  10h
+		mov  ah, 08h
+		int  10h
+		cmp al, 0x68			; Hello Command
+		je command_hello
+		cmp al, 0x65			; Echo Command
+		je command_echo
+		cmp al, 0x0 			; No Command
+		je command_null
+		cmp al, 0x72			; Reboot Command
+		je command_reboot
+		cmp al, 0x73 			; S Commands
+		je command_shutdown
+		cmp al, 0x7a			; ZS Command
+		je command_zech_pref
+		jmp read_command_end
+	read_command_end:
+		jmp kernel_loop
+
+
+read_next:
+	mov  bh, 0
+	mov  ah, 03h    ;BIOS.GetCursor -> CL, CH, DL, DH
+	int  10h
+ 	inc  dl     	;Move Cursor Right
+	mov  ah, 02h    ;BIOS.SetCursor
+	int  10h
+	mov  ah, 08h    ;BIOS.ReadCharacterAndAttribute -> AL, AH
+	int  10h
+	ret
+
+
+command_fail:
+	call newline
+	mov si, bad_command
+	call print
+	call newline
+	jmp kernel_loop
+
+
+command_invalid:
+	call newline
+	mov si, invalid_command
+	call print
+	call newline
+	jmp kernel_loop
+
+
+command_null:
+	call newline
+	mov si, null_command
+	call print
+	call newline
+	jmp kernel_loop
+
+
+command_help:
+	call newline
+	mov si, list_command
+	call print
+	call newline
+	jmp kernel_loop
+
+
+command_hello:
+	mov  bh, 0
+	mov  ah, 03h
+	int  10h
+ 	inc  dl
+	mov  ah, 02h
+	int  10h
+	mov  ah, 08h
+	int  10h
+	cmp al, 0x65
+	je hello_l
+	jmp command_invalid
+	hello_l:
+		call read_next
+		cmp al, 0x6c
+		je hello_ll
+		jmp command_invalid
+	hello_ll:
+		call read_next
+		cmp al, 0x6c
+		je hello_o
+		cmp al, 0x70 			;Help Command is found here
+		je command_help
+		jmp command_invalid
+	hello_o:
+		call read_next
+		cmp al, 0x6f
+		je hello_true
+		jmp command_invalid
+	hello_true:
+		call newline
+		mov si, hello_world
+		call print
+		call newline
+		jmp hello_end
+	hello_end:
+		jmp kernel_loop
+
+
+command_echo:
+	call read_next
+	cmp al, 0x63
+	je echo_h
+	jmp invalid_command
+	echo_h:
+		call read_next
+		cmp al, 0x68
+		je echo_o
+		jmp invalid_command
+	echo_o:
+		call read_next
+		cmp al, 0x6f
+		je echo_true
+		jmp invalid_command
+	echo_true:
+		call read_next
+		jmp echo_loop
+		echo_loop:
+			call read_next
+			push ax
+			cmp al, 0x3b
+			je echo_final
+			jmp echo_loop
+	echo_final:
+		mov  ah, 03h
+		int  10h
+		inc dh
+		sub dl, 5
+		mov  ah, 0x02
+		int  0x10
+		pop ax
+		echo_final_loop:
+			dec  dl
+			mov  ah, 0x02
+			int  0x10
+			pop  ax
+			call printchar
+			mov  ah, 03h
+			int  10h
+ 			dec  dl
+			mov  ah, 02h
+			int  10h
+			mov  ah, 03h
+			int  10h
+			cmp dl, 0
+			je echo_end
+			jmp echo_final_loop
+	echo_end:
+		call newline
+		jmp kernel_loop
+
+command_shutdown:
+	call read_next
+	cmp al, 0x68
+	je shutdown_u
+	cmp al, 0x65
+	je command_serial
+	jmp command_invalid
+	shutdown_u:
+		call read_next
+		cmp al, 0x75
+		je shutdown_t
+		jmp command_invalid
+	shutdown_t:
+		call read_next
+		cmp al, 0x74
+		je shutdown_d
+		jmp command_invalid
+	shutdown_d:
+		call read_next
+		cmp al, 0x64
+		je shutdown_o
+		jmp command_invalid
+	shutdown_o:
+		call read_next
+		cmp al, 0x6f
+		je shutdown_w
+		jmp command_invalid
+	shutdown_w:
+		call read_next
+		cmp al, 0x77
+		je shutdown_n
+		jmp command_invalid
+	shutdown_n:
+		call read_next
+		cmp al, 0x6e
+		je shutdown_true
+		jmp command_invalid
+	shutdown_true:
+		call clear_screen
+		call newline
+		mov si, shutdown_dialog
+		call print
+		call newline
+		mov si, anykey
+		call print
+		call pause
+		call shutdown
+		jmp kernel_loop
+
+
+command_reboot:
+	call read_next
+	cmp al, 0x65
+	je reboot_b
+	jmp command_invalid
+	reboot_b:
+	call read_next
+	cmp al, 0x62
+	je reboot_o
+	jmp command_invalid
+	reboot_o:
+	call read_next
+	cmp al, 0x6f
+	je reboot_oo
+	jmp command_invalid
+	reboot_oo:
+	call read_next
+	cmp al, 0x6f
+	je reboot_t
+	jmp command_invalid
+	reboot_t:
+	call read_next
+	cmp al, 0x74
+	je reboot_true
+	jmp command_invalid
+	reboot_true:
+		pop ax
+		pop bx
+		pop cx
+		pop dx
+		pop ax
+		pop bx
+		pop cx
+		pop dx
+		pop ax
+		pop bx
+		pop cx
+		pop dx
+		call clear_screen
+		jmp start
+
+
+
+
+command_serial:
+	; Comparing for r because shutdown command compares for e
+	call read_next
+	cmp al, 0x72
+	je serial_i
+	jmp command_invalid
+	serial_i:
+		call read_next
+		cmp al, 0x69
+		je serial_a
+		jmp command_invalid
+	serial_a:
+		call read_next
+		cmp al, 0x61
+		je serial_l
+		jmp command_invalid
+	serial_l:
+		call read_next
+		cmp al, 0x6c
+		je serial_true
+		jmp command_invalid
+	serial_true:
+		call read_next
+		serial_read_loop:
+			call read_next
+			cmp al, 0x3b
+			je serial_end
+			push ax
+			jmp serial_read_loop
+	serial_end:
+        MOV AH,00
+        MOV AL,11100011b
+        MOV DX, 0x03
+        INT 14H
+        MOV AH,1
+        MOV AL,'A'
+        MOV DX, 0x03
+        INT 14H
+		call newline
+		mov si, serial_sent
+		call print
+		call newline
+		jmp kernel_loop
+
+
+	times 2048-($-$$) db 0
