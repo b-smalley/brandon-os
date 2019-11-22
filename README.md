@@ -1,5 +1,5 @@
 # Brandon-OS
-Super simple boot loader with extra features and some commands. I used public resources and code segments from various places like stack overflow but coded a lot by myself
+Super simple boot loader with extra features and some commands. I used public resources and code segments from various places like stack overflow but wrote a lot by myself.
 
 ## Commands
 * Hello
